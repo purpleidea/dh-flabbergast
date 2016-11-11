@@ -1,0 +1,16 @@
+Source: dh-flabbergast
+Section: devel
+Priority: optional
+Maintainer: Andre Masella <andre@masella.name>
+Build-Depends: debhelper (>=9)
+Standards-Version: 3.9.6
+Homepage: https://github.com/flabbergast-config/dh-flabbergast
+
+Package: dh-flabbergast
+Architecture: all
+Depends: ${misc:Depends}, ${perl:Depends}, libxml-libxml-perl (>=2.0)
+Recommends: flabbergast-cli | flabbergast-java
+Description: Debian helper tools for packaging Flabbergast libraries
+ This package contains:
+  * dh_flabbergast - calculates Flabbergast dependencies for Debian packages,
+    generates o_0libs for providing them

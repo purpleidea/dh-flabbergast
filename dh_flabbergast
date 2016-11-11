@@ -1,0 +1,140 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+dh_flabbergast - determine Flabbergast library dependencies
+
+=cut
+
+use strict;
+use warnings;
+use Debian::Debhelper::Dh_Lib;
+use File::Temp qw/ tempdir /;
+use XML::LibXML;
+
+=head1 SYNOPSIS
+
+B<dh_flabbergast> [S<I<debhelper options>>] [B<--docgen=>docgen]
+
+=head1 DESCRIPTION
+
+B<dh_flabbergast> is a debhelper program that scans From: directives to
+determine what dependencies a Flabbergast library has and choose packages
+accordingly. It sets the variable flabbergast:Depends.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--docgen=>docgen
+
+Use an alternate documentation generator instead of flabbergast-docgen from the
+path.
+
+=back
+
+=cut
+
+my $docgen = "flabbergast-docgen";
+init(
+    options => {
+        "docgen=s", => \$docgen,
+    }
+);
+
+isnative( $dh{MAINPACKAGE} );
+
+# All the libraries used by a package { package_name::str -> [ flabbergast_lib::str ] }
+my %pkg_refs;
+
+# All the packages providing a library in this build { flabbergast_lib::str -> dpkg_deps_list::str ] }
+my %local_knowns;
+
+foreach my $package ( @{ $dh{DOPACKAGES} } ) {
+    my $tmp        = tmpdir($package);
+    my $docdir     = tempdir( CLEANUP => 1 );
+    my $pkg_depend = "$package (>= $dh{VERSION})";
+
+    # Produce the XML files with the reference data
+    doit( $docgen, "$tmp/usr/share/flabbergast/lib", "-o", $docdir );
+    my %refd;
+    my %defd;
+
+    # Collect all references and definitions in the libraries of this package.
+    foreach my $file ( glob "$docdir/doc-*.xml" ) {
+        my $dom = XML::LibXML->new->parse_file($file);
+        my $xpc = XML::LibXML::XPathContext->new;
+        $xpc->registerNs( "o_0", "http://flabbergast.org/api" );
+
+        for my $node (
+            $xpc->findnodes( '//o_0:ref/text()', $dom->documentElement() ) )
+        {
+            $refd{ $node->toString } = 1;
+        }
+        $defd{ $dom->documentElement()
+              ->getAttributeNS( "http://flabbergast.org/api", "name" ) } = 1;
+    }
+
+# Prune all the self-dependencies and collect all the inter-package-with-in-build dependencies
+    for my $def ( keys %defd ) {
+        delete $refd{$def};
+        if ( defined $local_knowns{$def} ) {
+            $local_knowns{$def} .= " | $pkg_depend";
+        }
+        else {
+            $local_knowns{$def} = $pkg_depend;
+        }
+    }
+
+    # Store references for later processing
+    $pkg_refs{$package} = [ keys %refd ];
+}
+
+# Use dpkg to find the package that provides a library
+sub find_source {
+    my $lib = shift;
+    if ( $lib =~ /interop$/ ) {
+        return undef;
+    }
+    my @dpkg =
+      split( /:/, `dpkg -S /usr/share/flabbergast/lib/$lib.o_0 2>/dev/null` );
+    if (@dpkg) {
+        return $dpkg[0];
+    }
+    error("$lib does not belong to any package");
+}
+
+# Prepare a dependency list from references of each package
+foreach my $package ( @{ $dh{DOPACKAGES} } ) {
+    my $depstr = "";
+    if ( defined $pkg_refs{$package} ) {
+        my %depends;
+        for my $dep (
+            grep { defined }
+            map { $local_knowns{$_} // find_source($_) }
+            @{ $pkg_refs{$package} }
+          )
+        {
+            $depends{$dep} = 1;
+        }
+        $depstr = join( ", ", sort keys %depends );
+    }
+    my $ext          = pkgext($package);
+    my $substvarfile = "debian/${ext}substvars";
+    complex_doit( "(grep -a -s -v flabbergast:Depends $substvarfile; echo "
+          . escape_shell("flabbergast:Depends=$depstr")
+          . ") > $substvarfile.new" );
+    doit( "mv", "$substvarfile.new", $substvarfile );
+}
+
+=head1 SEE ALSO
+
+L<debhelper(7)>
+
+This program is a part of debhelper.
+
+=head1 AUTHOR
+
+Andre Masella <andre@masella.name>
+
+=cut

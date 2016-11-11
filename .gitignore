@@ -1,0 +1,7 @@
+*.1
+*.bak
+debian/*.log
+debian/*.substvars
+debian/debhelper-build-stamp
+debian/dh-flabbergast/
+debian/files
